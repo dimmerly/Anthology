@@ -50,10 +50,10 @@ full past of that library.
 	<tbody>
 		<tr>
             <td align="center">
-                <a href="https://github.com/sinnwrig">
-                    <img src="https://avatars.githubusercontent.com/u/116330012?v=4" width="100;" alt="sinnwrig"/>
+                <a href="https://github.com/dimmerly">
+                    <img src="https://avatars.githubusercontent.com/u/223179705?v=4" width="100;" alt="dimmerly"/>
                     <br />
-                    <sub><b>Kai Angulo</b></sub>
+                    <sub><b>Dimmer</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -61,6 +61,13 @@ full past of that library.
                     <img src="https://avatars.githubusercontent.com/u/8621606?v=4" width="100;" alt="michaelsakharov"/>
                     <br />
                     <sub><b>Wulferis</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/sinnwrig">
+                    <img src="https://avatars.githubusercontent.com/u/116330012?v=4" width="100;" alt="sinnwrig"/>
+                    <br />
+                    <sub><b>Kai Angulo</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -84,6 +91,8 @@ full past of that library.
                     <sub><b>William Chen</b></sub>
                 </a>
             </td>
+		</tr>
+		<tr>
             <td align="center">
                 <a href="https://github.com/PaperPrototype">
                     <img src="https://avatars.githubusercontent.com/u/48071553?v=4" width="100;" alt="PaperPrototype"/>
@@ -91,8 +100,6 @@ full past of that library.
                     <sub><b>Abdiel Lopez</b></sub>
                 </a>
             </td>
-		</tr>
-		<tr>
             <td align="center">
                 <a href="https://github.com/Acissathar">
                     <img src="https://avatars.githubusercontent.com/u/10227954?v=4" width="100;" alt="Acissathar"/>
@@ -119,13 +126,6 @@ full past of that library.
                     <img src="https://avatars.githubusercontent.com/u/25212675?v=4" width="100;" alt="MiniMe453"/>
                     <br />
                     <sub><b>MiniMe453</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/dimmerly">
-                    <img src="https://avatars.githubusercontent.com/u/223179705?v=4" width="100;" alt="dimmerly"/>
-                    <br />
-                    <sub><b>Dimmer</b></sub>
                 </a>
             </td>
             <td align="center">
