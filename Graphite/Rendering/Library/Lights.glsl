@@ -1,5 +1,5 @@
-// Forward lighting from lights: local lights from the H-Forward trees and directional lights from the world's buffer
-// with the sun first. Directional lights are in lux, points and spots in candela, rects, disks and tubes in nits.
+// Forward lighting from lights: local lights from the view's clusters in fragments and the light trees elsewhere, see
+// Graphite/LightClusters.glsl and Graphite/Trees.glsl, and directional lights from the world's buffer with the sun first. Directional lights are in lux, points and spots in candela, rects, disks and tubes in nits.
 // Spheres, tubes, rects and disks light diffuse by their luminance times their cosine weighted solid angle. Spheres light
 // specular from their most representative point, the lobe widened by the light's size so their energy stays right. Tubes,
 // rects and disks give the share of each specular lobe they cover, by linearly transformed cosines, which the surface
@@ -19,6 +19,7 @@
 #include "Graphite/CloudShadow.glsl"
 #include "Graphite/FarShadow.glsl"
 #include "Graphite/Ltc.glsl"
+#include "Graphite/LightClusters.glsl"
 
 // Contact hardening is compiled in while a light of the world uses it
 #pragma variant global GRAPHITE_CONTACT_SHADOWS
@@ -115,7 +116,7 @@ float Graphite_LocalLightShadow(Graphite_LightSample L, vec3 relativePos, vec3 g
 // Reads where a recorded light is and what it is. offset and offsetLow move camera relative positions into its tree.
 void Graphite_ReadLight(uint array, uint index, vec3 offset, vec3 offsetLow, out Graphite_LightSample L)
 {
-    uint w = index * 9u;
+    uint w = index * GRAPHITE_LIGHT_WORDS;
     vec4 positionRange = Graphite_SpatialVec4(array, w);
     precise vec3 position = (positionRange.xyz - offset) - offsetLow;
     L.position = position;
@@ -130,6 +131,53 @@ void Graphite_ReadLight(uint array, uint index, vec3 offset, vec3 offsetLow, out
     L.spotCos = -1.0;
     L.innerSpotCos = 1.0;
 }
+
+#ifdef GRAPHITE_CLUSTERED
+
+// The lights of the fragment's cluster, each given only if its sphere holds the point and it lights the surface's
+// layers. Their shadows are looked up as each is shaded, after the cheaper tests that skip it.
+struct Graphite_LightIterator
+{
+    uint next;               // the slot of the next hit in the cluster
+    uint count;              // one past the last
+    vec3 position;
+    uint layers;
+};
+
+Graphite_LightIterator Graphite_BeginLights(vec3 relativePos)
+{
+    Graphite_LightIterator it;
+    uint base = Graphite_FragmentCluster(relativePos);
+    it.next = base + 1u;
+    it.count = base + 1u + min(graphite_LightClusters[base].x, GRAPHITE_CLUSTER_MAX_LIGHTS);
+    it.position = relativePos;
+    it.layers = Graphite_SurfaceLayers();
+    return it;
+}
+
+bool Graphite_NextLight(inout Graphite_LightIterator it, out Graphite_LightSample L)
+{
+    while (it.next < it.count)
+    {
+        uvec2 hit = graphite_LightClusters[it.next++];
+        uint array = GRAPHITE_SET_LIGHTS * 2u + (hit.x >> 31);
+        uint index = hit.x & 0x7FFFFFFFu;
+        if ((floatBitsToUint(Graphite_SpatialVec4(array, index * GRAPHITE_LIGHT_WORDS + 6u).w) & it.layers) == 0u)
+            continue;
+        vec3 offset, offsetLow;
+        Graphite_HitOffsets(GRAPHITE_SET_LIGHTS, hit.y, offset, offsetLow);
+        Graphite_ReadLight(array, index, offset, offsetLow, L);
+        vec3 d = it.position - L.position;
+        if (dot(d, d) <= L.range * L.range)
+            return true;
+    }
+    return false;
+}
+
+// Shadows are looked up as each light is shaded, see Graphite_ContributeLocal
+void Graphite_ShadowLights(Graphite_LightIterator it, vec3 relativePos, vec3 geomNormal) {}
+
+#else
 
 // The lights whose spheres hold a point and that light the surface's layers, the first GRAPHITE_MAX_HITS of them, found
 // before any is read so walking the trees and shading the lights never hold their registers at once. Queries share the
@@ -190,6 +238,8 @@ void Graphite_ShadowLights(Graphite_LightIterator it, vec3 relativePos, vec3 geo
         graphite_HitShadows[it.next - 1u] = shadow;
     }
 }
+
+#endif
 
 // Where and how a point is lit, each specular lobe with its own normal and GGX alpha. A model defines GRAPHITE_LIGHT_COAT
 // to have the coat lobe lit and GRAPHITE_LIGHT_BACK to have the light reaching its back, else neither is computed.
@@ -585,10 +635,15 @@ bool Graphite_ContributeLocal(Graphite_LightSample L, Graphite_LightFrame f, boo
     return graphite_ContributeLocal(L, f, backLit, true, 1.0, c);
 }
 
-// The same with the shadow Graphite_ShadowLights found for the light the iterator last gave
+// The same with the shadow Graphite_ShadowLights found for the light the iterator last gave, looked up here for
+// clustered lights
 bool Graphite_ContributeLocal(Graphite_LightIterator it, Graphite_LightSample L, Graphite_LightFrame f, bool backLit, out Graphite_LightContribution c)
 {
+#ifdef GRAPHITE_CLUSTERED
+    return graphite_ContributeLocal(L, f, backLit, true, 1.0, c);
+#else
     return graphite_ContributeLocal(L, f, backLit, false, graphite_HitShadows[it.next - 1u], c);
+#endif
 }
 
 // A shadowed directional light's shadow map alone

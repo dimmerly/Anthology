@@ -691,8 +691,9 @@ internal sealed class HandleStore<T> where T : struct
 }
 
 /// <summary>
-/// The render side of a world's lights and decals, shaded with H-Forward: point and spot lights and decals live in
-/// four wide trees over their bounds, and a fragment walks them as a point query, no per frame culling. Static lights
+/// The render side of a world's lights and decals: point and spot lights and decals live in four wide trees over their
+/// bounds, which each view bins into its clusters once a frame for fragments to read, see <see cref="LightClusterPass"/>,
+/// and other stages walk as a point query. Static lights
 /// and decals live in regions of space with a tree each, rebuilt only when one of their members changes. Moving ones
 /// are culled to each view and built into a fresh tree per view every frame. Directional lights, ambient light and fog
 /// live in one world record.
@@ -1570,6 +1571,9 @@ internal struct SpatialRoots
     private uint _pad0, _pad1;
 
     public static readonly SpatialRoots None = new() { Regions = LightTreeBuilder.Invalid, Moving = LightTreeBuilder.Invalid };
+
+    /// <summary>Whether the view sees none of the set: neither tree has a root.</summary>
+    public readonly bool IsEmpty => Regions == LightTreeBuilder.Invalid && Moving == LightTreeBuilder.Invalid;
 }
 
 /// <summary>The buffers a view builds a set's trees into each frame.</summary>

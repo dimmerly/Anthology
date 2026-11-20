@@ -122,6 +122,7 @@ internal sealed class ViewGraph
             Camera.Selected.Exists(static feature => feature.ReadsHiZ && feature.Slot >= RenderSlot.OpaqueColor));
         View = Camera.Info;
 
+        Frame.LightClusters.Add(this);
         bool adopted = false;
         foreach (RenderFeature feature in Camera.Selected)
         {

@@ -1845,6 +1845,9 @@ public sealed class DrawItemSink
     private CullFrustum _frustum;
     private uint _cullingMask;
     private bool _shadowView;
+
+    /// <summary>Every layer of the items providers added to the view this frame.</summary>
+    internal uint ItemLayers { get; private set; }
     private RenderableFlags _hidden = RenderableFlags.Hidden;
 
     /// <summary>Indirect items whose instance count is copied from the provider's buffer into the view's commands.</summary>
@@ -1858,6 +1861,7 @@ public sealed class DrawItemSink
         _world = world;
         _frustum = frustum;
         _cullingMask = cullingMask;
+        ItemLayers = 0;
         _used = 0;
         foreach (ProvidedItems items in _lists.Values)
         {
@@ -1958,6 +1962,7 @@ public sealed class DrawItemSink
         ArgumentNullException.ThrowIfNull(material);
         if ((item.LayerMask & _cullingMask) == 0 || (item.Flags & _hidden) != 0)
             return;
+        ItemLayers |= item.LayerMask;
         if (material.IsDisposed || material.Draw is not { } draw || material.Table == null)
             return;
         if ((uint)subMesh >= (uint)placement.SubMeshes.Length)

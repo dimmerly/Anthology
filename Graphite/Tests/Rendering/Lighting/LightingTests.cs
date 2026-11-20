@@ -380,6 +380,133 @@ public sealed partial class LightingTests : IDisposable
     }
 
     [Fact]
+    public void AClusterHoldingMoreLightsThanFit_KeepsTheOnesLightingItMost()
+    {
+        Vector3 albedo = new(0.8f, 0.7f, 0.6f);
+        AddQuad(Surface(new Float3(albedo.X, albedo.Y, albedo.Z), 0.5f));
+        for (int i = 0; i < 80; i++)
+            _world.AddLight(Point(new Double3(0, 0, -30), 50, 1e-7f, new Float3(1, 1, 1)));
+        LightDesc light = Point(new Double3(0.5, -0.5, 8), 6, 0.05f, new Float3(1, 0.8f, 0.6f));
+        _world.AddLight(light);
+
+        AssertMatches(p => Reference.Local(light, p, s_normal, albedo, 0, 0.5f), Frame());
+    }
+
+    [Fact]
+    public void AClusterHoldingMoreLightsThanFit_KeepsTheBrightest_NotTheWidestReaching()
+    {
+        Vector3 albedo = new(0.8f, 0.7f, 0.6f);
+        AddQuad(Surface(new Float3(albedo.X, albedo.Y, albedo.Z), 0.5f));
+        for (int i = 0; i < 80; i++)
+            _world.AddLight(Point(new Double3(0, 0, QuadDepth - 20), 50, 1e-7f, new Float3(1, 1, 1)));
+        LightDesc light = Point(new Double3(0.5, -0.5, QuadDepth - 3), 6, 0.05f, new Float3(1, 0.8f, 0.6f));
+        _world.AddLight(light);
+
+        AssertMatches(p => Reference.Local(light, p, s_normal, albedo, 0, 0.5f), Frame());
+    }
+
+    [Fact]
+    public void LightsOnLayersNothingDrawnIsOn_LeaveRoomInTheClusters()
+    {
+        Vector3 albedo = new(0.8f, 0.7f, 0.6f);
+        AddQuad(Surface(new Float3(albedo.X, albedo.Y, albedo.Z), 0.5f), layer: 1);
+        for (int i = 0; i < 80; i++)
+            _world.AddLight(Point(new Double3(0, 0, QuadDepth - 1), 50, 10f, new Float3(1, 1, 1)) with { LayerMask = 2 });
+        LightDesc light = Point(new Double3(0.5, -0.5, 8), 6, 0.05f, new Float3(1, 0.8f, 0.6f)) with { LayerMask = 1 };
+        _world.AddLight(light);
+
+        AssertMatches(p => Reference.Local(light, p, s_normal, albedo, 0, 0.5f), Frame());
+    }
+
+    private const double FarDepth = 600;
+
+    // A quad filling the view far down it, past the slices clusters spread logarithmically over, lit by a light before it.
+    // Down +z, or -z for a view looking that way. Lights only reach about a hundred units, see graphite_ContributeLocal.
+    private void AddFarQuadAndLight(int along = 1)
+    {
+        AddFarQuad(along);
+        _world.AddLight(Point(new Double3(0, 0, along * (FarDepth - 20)), 200, 400f, new Float3(1, 1, 1)));
+    }
+
+    private void AddFarQuad(int along = 1) => AddPlane(along * FarDepth, (float)FarDepth * 2, along);
+
+    // A square facing the camera, half wide either way of the view's axis at depth
+    private void AddPlane(double depth, float half, int along = 1)
+    {
+        Float3[] positions = [new(-half, -half, 0), new(half, -half, 0), new(half, half, 0), new(-half, half, 0)];
+        Float3[] normals = [new(0, 0, -along), new(0, 0, -along), new(0, 0, -along), new(0, 0, -along)];
+        GpuMesh quad = _renderer.CreateMesh(new MeshData
+        {
+            VertexCount = 4,
+            Streams =
+            [
+                new VertexStream { Semantic = VertexSemantic.Position, Format = VertexElementFormat.Float3, Data = MemoryMarshal.AsBytes(positions.AsSpan()).ToArray() },
+                new VertexStream { Semantic = VertexSemantic.Normal, Format = VertexElementFormat.Float3, Data = MemoryMarshal.AsBytes(normals.AsSpan()).ToArray() },
+            ],
+            Indices = new uint[] { 0, 1, 2, 0, 2, 3 },
+        });
+        _world.Add(new RenderableDesc { Mesh = quad, Transform = Double4x4.CreateTranslation(_origin + new Double3(0, 0, depth)), LayerMask = ~0u },
+            [Surface(new Float3(0.8f, 0.8f, 0.8f))]);
+    }
+
+    // Through a perspective projection reaching on forever, reversed Z, ninety degrees across, its near plane at 0.1
+    private static readonly Float4x4 s_infinitePerspective = new(new Float4(1, 0, 0, 0), new Float4(0, 1, 0, 0), new Float4(0, 0, 0, 1), new Float4(0, 0, 0.1f, 0));
+
+    // Turned half round about y, looking down -z
+    private static readonly Float4x4 s_lookingBack = new(new Float4(-1, 0, 0, 0), new Float4(0, 1, 0, 0), new Float4(0, 0, -1, 0), new Float4(0, 0, 0, 1));
+
+    private Float4[] FarFrame(float farDistance, int along = 1)
+    {
+        RenderView view = _harness.BareView(1);
+        view.EV100 = _ev100;
+        Float4x4 look = along > 0 ? Float4x4.Identity : s_lookingBack;
+        view.Camera = new ViewCamera(new ViewLayer { View = look, Projection = s_infinitePerspective, Position = _origin }, near: 0.1f, farDistance: farDistance);
+        return _harness.Frame(new FrameDesc { Views = new[] { view } });
+    }
+
+    private static void AssertSamePixels(Float4[] expected, Float4[] pixels)
+    {
+        Assert.Contains(expected, p => p.X > 0.01f);
+        for (int i = 0; i < pixels.Length; i++)
+            Assert.True(Vector3.Distance(new Vector3(expected[i].X, expected[i].Y, expected[i].Z), new Vector3(pixels[i].X, pixels[i].Y, pixels[i].Z)) <= 1e-4f + 1e-3f * expected[i].X,
+                $"pixel {i}: want {expected[i]}, got {pixels[i]}");
+    }
+
+    [Fact]
+    public void SurfacesPastTheLogicalFarDistance_StillTakeTheirLights()
+    {
+        AddFarQuadAndLight();
+        AssertSamePixels(FarFrame(1000), FarFrame(100));
+    }
+
+    [Fact]
+    public void ClusterBoxesSpanningManyRegions_FindTheStaticLightsOfEveryOne()
+    {
+        // A plane far down the view with a light just before each middle pixel's point on it. The pixels lie further
+        // apart than a region is wide, so every light is in a region of its own, and each far cluster's box overlaps far
+        // more region tree leaves than a query gathers at once, in whatever order. The same lights moving live in the
+        // view's own tree, in no region.
+        const double depth = 600000;
+        AddPlane(depth, (float)depth * 2);
+        List<(LightHandle Handle, LightDesc Desc)> lights = new();
+        for (int y = 2; y < Size - 2; y++)
+        {
+            for (int x = 2; x < Size - 2; x++)
+            {
+                Double3 point = new(((x + 0.5) / Size * 2 - 1) * depth, ((y + 0.5) / Size * 2 - 1) * depth, depth - 50);
+                LightDesc light = Point(point, 100, 400f, new Float3(1, 1, 1));
+                lights.Add((_world.AddLight(light), light));
+            }
+        }
+        Float4[] still = FarFrame(1000);
+        foreach ((LightHandle handle, LightDesc light) in lights)
+            _world.SetLight(handle, light with { Static = false });
+        Float4[] moving = FarFrame(1000);
+        Assert.True(moving.Count(p => p.X > 0.01f) >= (Size - 4) * (Size - 4), $"{moving.Count(p => p.X > 0.01f)} pixels lit");
+        AssertSamePixels(moving, still);
+    }
+
+    [Fact]
     public void MovingLights_LightExactlyLikeStaticOnes()
     {
         AddQuad(Surface(new Float3(0.8f, 0.8f, 0.8f)));
@@ -1139,6 +1266,33 @@ public sealed partial class LightingTests : IDisposable
         _world.AddDecal(Decal(new Double3(0, 0, QuadDepth), new Double3(8, 8, 2), new Float4(0, 1, 0, 0.5f), priority: 9));
 
         AssertMatches(_ => new Vector3(0, 0.5f, 0.5f), Frame());
+    }
+
+    [Fact]
+    public void MoreDecalsThanAPointTakes_ApplyOnlyTheHighestPriorityOnesCoveringIt()
+    {
+        LitByAmbient();
+        AddQuad(Surface(new Float3(0, 0, 1)));
+        _world.AddDecal(Decal(new Double3(0, 0, QuadDepth), new Double3(8, 8, 2), new Float4(1, 0, 0, 1), priority: 0));
+        _world.AddDecal(Decal(new Double3(0, 0, QuadDepth), new Double3(8, 8, 2), new Float4(1, 0, 0, 1), priority: 1, isStatic: true));
+        for (int i = 0; i < 8; i++)
+            _world.AddDecal(Decal(new Double3(-2, 0, QuadDepth), new Double3(4, 8, 2), new Float4(1, 1, 1, 0.1f), priority: 2 + i, isStatic: i % 2 == 0));
+
+        // Left the eight faint ones are the highest covering it, so the red ones under them are left out; right only the red ones cover it
+        float kept = MathF.Pow(0.9f, 8);
+        AssertMatches(p => p.X < 0 ? new Vector3(1 - kept, 1 - kept, 1) : new Vector3(1, 0, 0), Frame());
+    }
+
+    [Fact]
+    public void DecalsOnLayersNothingDrawnIsOn_LeaveRoomInTheClusters()
+    {
+        LitByAmbient();
+        AddQuad(Surface(new Float3(1, 1, 1)), layer: 1);
+        _world.AddDecal(Decal(new Double3(0, 0, QuadDepth), new Double3(8, 8, 2), new Float4(1, 0, 0, 1), priority: 0, layer: 1));
+        for (int i = 0; i < 40; i++)
+            _world.AddDecal(Decal(new Double3(0, 0, QuadDepth), new Double3(8, 8, 2), new Float4(0, 1, 0, 1), priority: 10, layer: 2));
+
+        AssertMatches(_ => new Vector3(1, 0, 0), Frame());
     }
 
     [Fact]

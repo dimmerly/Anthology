@@ -217,6 +217,20 @@ internal sealed class CameraFrame : IDisposable
     public DeviceBuffer? CullState;
     private readonly PersistentBuffer _cullState;
 
+    /// <summary>
+    /// The view's local lights and decals binned by cluster, see <see cref="LightClusterPass"/>. None while <see cref="BinsLights"/> is false.
+    /// </summary>
+    public DeviceBuffer? LightClusters;
+
+    /// <summary>
+    /// Whether the view bins its lights and decals this frame: not for shadow and voxel views or a view drawing no
+    /// renderables, which light no fragments, nor while it sees no light or decal. A view that does not binds the empty
+    /// clusters, keeping its buffer for when it does again.
+    /// </summary>
+    private bool BinsLights => !IsShadowView && Desc.Kind != ViewKind.Voxelization && Desc.CullingMask != 0
+        && (!Roots[SpatialIndex.LightsSet].IsEmpty || !Roots[SpatialIndex.DecalsSet].IsEmpty);
+    private readonly PersistentBuffer _lightClusters;
+
     /// <summary>Whether this frame's lists have commands the GPU cull fills, and the stamp of that cull.</summary>
     public bool GpuCulls;
     public uint CullStamp = 1;
@@ -383,6 +397,7 @@ internal sealed class CameraFrame : IDisposable
         CullView = _tables.Array("CullView");
         CullMaps = _tables.Array("CullMaps");
         _cullState = new PersistentBuffer(RenderResourceID.Intern($"Graphite.Camera{viewId}.CullState"), BufferUsage.StructuredBufferReadWrite);
+        _lightClusters = new PersistentBuffer(RenderResourceID.Intern($"Graphite.Camera{viewId}.LightClusters"), BufferUsage.StructuredBufferReadWrite);
         _device = device;
     }
 
@@ -504,6 +519,9 @@ internal sealed class CameraFrame : IDisposable
         Buffers.Add(CullMaps.Persistent);
         if (_cullState.Buffer != null)
             Buffers.Add(_cullState);
+        LightClusters = BinsLights ? _lightClusters.Resolve(_device, _frame.Store, LightClusterPass.Size(LayerCount)) : null;
+        if (LightClusters != null)
+            Buffers.Add(LightClusters);
         foreach (SpatialView? view in Spatial)
             view?.AddBuffers(Buffers);
     }
@@ -700,6 +718,7 @@ internal sealed class CameraFrame : IDisposable
         foreach (GpuArray array in new[] { Instances, Records, Commands, ViewBlocks, SpatialRoots, Cascades, CullView, CullMaps })
             array.Release();
         _cullState.Release(_frame.Store);
+        _lightClusters.Release(_frame.Store);
         foreach (SpatialView? view in Spatial)
             view?.Release();
         _visibilityView.View?.Dispose();

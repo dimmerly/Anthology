@@ -1,6 +1,10 @@
-// Spatial sets: the four wide trees of H-Forward shading, for lights, decals, reflection probes and any set a host makes.
-// A point query walks a tree testing a node's four child boxes at once and returns the leaves whose box holds the point,
-// each a run of records. The layout matches LightTreeNode.
+// Spatial sets: the four wide trees lights, decals, reflection probes and any set a host makes are found through. A
+// point query walks a tree testing a node's four child boxes at once and returns the leaves whose box holds the point,
+// each a run of records; a box query returns the leaves its box overlaps. The layout matches LightTreeNode.
+//
+// Fragments read their lights and decals from the view's clusters, which Graphite/Internal/LightClusters.glsl fills with
+// box queries once a frame, see Graphite/LightClusters.glsl. Other stages, and reflection probes and host sets
+// everywhere, query the trees themselves.
 //
 // Static items live in regions of space, each with a tree around its own origin. A view has a tree over the regions it
 // sees, camera relative, whose leaves hold each region's root and the camera's offset to its origin. Moving ones live in
@@ -91,8 +95,8 @@ void Graphite_BeginTree(out Graphite_TreeWalk w, uint nodes, uint root)
     w.overlap = 0u;
 }
 
-// Finds the next leaf whose box holds p and returns its records as [first, last)
-bool Graphite_NextLeaf(inout Graphite_TreeWalk w, vec3 p, out uint first, out uint last)
+// Finds the next leaf whose box overlaps the box from lo to hi and returns its records as [first, last)
+bool Graphite_NextLeafBox(inout Graphite_TreeWalk w, vec3 lo, vec3 hi, out uint first, out uint last)
 {
     first = 0u;
     last = 0u;
@@ -128,12 +132,18 @@ bool Graphite_NextLeaf(inout Graphite_TreeWalk w, vec3 p, out uint first, out ui
         w.node = w.next;
         Graphite_TreeNode node = graphite_SpatialNodes[nonuniformEXT(w.nodes)].nodes[w.node];
         w.next = GRAPHITE_TREE_INVALID;
-        bvec4 inside = bvec4(uvec4(greaterThanEqual(vec4(p.x), node.minX)) & uvec4(lessThanEqual(vec4(p.x), node.maxX))
-                           & uvec4(greaterThanEqual(vec4(p.y), node.minY)) & uvec4(lessThanEqual(vec4(p.y), node.maxY))
-                           & uvec4(greaterThanEqual(vec4(p.z), node.minZ)) & uvec4(lessThanEqual(vec4(p.z), node.maxZ)));
+        bvec4 inside = bvec4(uvec4(greaterThanEqual(vec4(hi.x), node.minX)) & uvec4(lessThanEqual(vec4(lo.x), node.maxX))
+                           & uvec4(greaterThanEqual(vec4(hi.y), node.minY)) & uvec4(lessThanEqual(vec4(lo.y), node.maxY))
+                           & uvec4(greaterThanEqual(vec4(hi.z), node.minZ)) & uvec4(lessThanEqual(vec4(lo.z), node.maxZ)));
         w.overlap = (inside.x ? 1u : 0u) | (inside.y ? 2u : 0u) | (inside.z ? 4u : 0u) | (inside.w ? 8u : 0u);
     }
     return false;
+}
+
+// Finds the next leaf whose box holds p and returns its records as [first, last)
+bool Graphite_NextLeaf(inout Graphite_TreeWalk w, vec3 p, out uint first, out uint last)
+{
+    return Graphite_NextLeafBox(w, p, p, first, last);
 }
 
 // Walks every tree of a set that may hold a point: the static regions the view sees, then the view's tree of moving ones.
@@ -143,29 +153,66 @@ struct Graphite_TreeQuery
     Graphite_TreeWalk items;
     uint set;
     vec3 position;           // camera relative
+    vec3 extent;             // the half size of a box query around position, 0 for a point
     vec3 offset;             // what moves a camera relative position into the walked tree's space, high and low with the layer's base
     vec3 offsetLow;
     uint movingRoot;
     uint entry;
     uint entryEnd;
     uint region;             // the region entry of the tree being walked, invalid for the moving tree
+    uint regionsRoot;        // the root of the view's tree over the regions
+    uint regionsTaken;       // region leaves gathered so far, the next gathering skipping them
+    bool regionsLeft;        // whether region leaves past the gathered runs hold the query
     int runs;                // runs of region entries still to walk
     int phase;               // 0 static regions, 1 the moving tree, 2 done
     bool walking;
 };
 
-// Queries share one traversal stack, so finish one before beginning another: they do not nest
-void Graphite_BeginQuery(out Graphite_TreeQuery q, vec3 position, uint set)
+// Walks the view's tree over the regions for up to GRAPHITE_REGION_RUNS runs of region entries holding the query, past
+// the ones already gathered, on the stack the item trees use, so only while no item tree is being walked. Notes whether
+// more remain, which a box spanning many regions can leave, for Graphite_NextRun to gather once these are walked.
+void graphite_GatherRegions(inout Graphite_TreeQuery q)
+{
+    Graphite_TreeWalk regions;
+    Graphite_BeginTree(regions, q.set * 3u + 2u, q.regionsRoot);
+    vec3 point = q.position + Graphite_View().treeOffset.xyz;
+    vec3 lo = point - q.extent, hi = point + q.extent;
+    uint first, end;
+    uint seen = 0u;
+    q.regionsLeft = false;
+    while (Graphite_NextLeafBox(regions, lo, hi, first, end))
+    {
+        if (seen++ < q.regionsTaken)
+            continue;
+        if (q.runs == GRAPHITE_REGION_RUNS)
+        {
+            q.regionsLeft = true;
+            break;
+        }
+        graphite_TreeStack[GRAPHITE_TREE_STACK + q.runs * 2] = first;
+        graphite_TreeStack[GRAPHITE_TREE_STACK + q.runs * 2 + 1] = end;
+        q.runs++;
+    }
+    q.regionsTaken += uint(q.runs);
+}
+
+// Queries share one traversal stack, so finish one before beginning another: they do not nest. A box query, extent its
+// half size, finds every leaf its box overlaps.
+void Graphite_BeginBoxQuery(out Graphite_TreeQuery q, vec3 position, vec3 extent, uint set)
 {
     uvec4 roots = set < uint(GRAPHITE_SPATIAL_SETS) ? graphite_SpatialRoots[set] : uvec4(GRAPHITE_TREE_INVALID);
     q.set = set;
     q.position = position;
+    q.extent = extent;
     q.offset = vec3(0.0);
     q.offsetLow = vec3(0.0);
     q.movingRoot = roots.y;
     q.entry = 0u;
     q.entryEnd = 0u;
     q.region = GRAPHITE_TREE_INVALID;
+    q.regionsRoot = roots.x;
+    q.regionsTaken = 0u;
+    q.regionsLeft = false;
     q.runs = 0;
     q.phase = roots.x == GRAPHITE_TREE_INVALID && roots.y == GRAPHITE_TREE_INVALID ? 2 : 0;
     q.walking = false;
@@ -173,17 +220,13 @@ void Graphite_BeginQuery(out Graphite_TreeQuery q, vec3 position, uint set)
     if (roots.x == GRAPHITE_TREE_INVALID)
         return;
 
-    // The regions tree is walked whole now, on the stack the item trees use later, keeping its runs above it
-    Graphite_TreeWalk regions;
-    Graphite_BeginTree(regions, set * 3u + 2u, roots.x);
-    vec3 point = position + Graphite_View().treeOffset.xyz;
-    uint first, end;
-    while (q.runs < GRAPHITE_REGION_RUNS && Graphite_NextLeaf(regions, point, first, end))
-    {
-        graphite_TreeStack[GRAPHITE_TREE_STACK + q.runs * 2] = first;
-        graphite_TreeStack[GRAPHITE_TREE_STACK + q.runs * 2 + 1] = end;
-        q.runs++;
-    }
+    // The regions are gathered now, on the stack the item trees use later, keeping their runs above it
+    graphite_GatherRegions(q);
+}
+
+void Graphite_BeginQuery(out Graphite_TreeQuery q, vec3 position, uint set)
+{
+    Graphite_BeginBoxQuery(q, position, vec3(0.0), set);
 }
 
 // Finds the next run of records whose leaf holds the point, as [first, last) of the record array records. q.offset and
@@ -197,7 +240,8 @@ bool Graphite_NextRun(inout Graphite_TreeQuery q, out uint records, out uint fir
     {
         if (q.walking)
         {
-            if (Graphite_NextLeaf(q.items, (q.position + q.offset) + q.offsetLow, first, last))
+            vec3 p = (q.position + q.offset) + q.offsetLow;
+            if (Graphite_NextLeafBox(q.items, p - q.extent, p + q.extent, first, last))
             {
                 records = q.phase == 1 ? Graphite_MovingRecords(q.set) : Graphite_StaticRecords(q.set);
                 return true;
@@ -236,6 +280,11 @@ bool Graphite_NextRun(inout Graphite_TreeQuery q, out uint records, out uint fir
             q.runs--;
             q.entry = graphite_TreeStack[GRAPHITE_TREE_STACK + q.runs * 2];
             q.entryEnd = graphite_TreeStack[GRAPHITE_TREE_STACK + q.runs * 2 + 1];
+            continue;
+        }
+        if (q.regionsLeft)
+        {
+            graphite_GatherRegions(q);
             continue;
         }
         q.phase = 1;

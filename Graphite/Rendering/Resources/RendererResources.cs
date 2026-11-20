@@ -91,6 +91,9 @@ internal sealed class RendererResources : IDisposable
         device.UpdateTexture<float>(NoFarShadowMap, [-1e30f], TextureRegion.Whole(NoFarShadowMap, 0, 0));
         NoFarShadowData = factory.CreateBuffer(new BufferDescription(FarShadowRecord.Size, BufferUsage.StructuredBufferReadOnly));
         device.UpdateBuffer(NoFarShadowData, 0, new FarShadowRecord());
+        uint[] noClusters = LightClusterPass.Empty();
+        NoLightClusters = factory.CreateBuffer(new BufferDescription((uint)noClusters.Length * 4, BufferUsage.StructuredBufferReadOnly));
+        device.UpdateBuffer<uint>(NoLightClusters, 0, noClusters);
         device.UpdateBuffer(NoCloudShadowData, 0, new CloudShadowRecord());
         NoVoxels = factory.CreateBuffer(new BufferDescription(VoxelHeader.Size + 4, BufferUsage.StructuredBufferReadWrite));
         device.UpdateBuffer(NoVoxels, 0, new VoxelHeader());
@@ -167,6 +170,9 @@ internal sealed class RendererResources : IDisposable
     public DeviceBuffer NoCloudShadowData { get; }
     public Texture NoFarShadowMap { get; }
     public DeviceBuffer NoFarShadowData { get; }
+
+    /// <summary>What views without clusters bind as their local lights' clusters, holding none.</summary>
+    public DeviceBuffer NoLightClusters { get; }
 
     /// <summary>What views other than a world's voxel view bind as the voxel volume, empty.</summary>
     public DeviceBuffer NoVoxels { get; }
@@ -298,6 +304,7 @@ internal sealed class RendererResources : IDisposable
         NoCloudShadowData.Dispose();
         NoFarShadowMap.Dispose();
         NoFarShadowData.Dispose();
+        NoLightClusters.Dispose();
         NoVoxels.Dispose();
         NoCube.Dispose();
         NoExposure.Dispose();

@@ -926,6 +926,21 @@ public sealed partial class RenderWorld : IDisposable
         public Double4x4[] Transform = [];
         public uint[] LayerMask = [];
         public RenderableFlags[] Flags = [];
+
+        // Per layer bit, every layer of the renderables ever on it. Only grows, so it may hold layers no renderable has now.
+        private readonly uint[] _layersWith = new uint[32];
+
+        /// <summary>
+        /// Every layer a renderable a view of this culling mask may draw is on, so a light or decal lighting none of them
+        /// lights nothing the view draws. Holds more layers than that once renderables have left or changed layer.
+        /// </summary>
+        public uint ReceiverLayers(uint cullingMask)
+        {
+            uint layers = 0;
+            for (uint bits = cullingMask; bits != 0; bits &= bits - 1)
+                layers |= _layersWith[System.Numerics.BitOperations.TrailingZeroCount(bits)];
+            return layers;
+        }
         public bool[] Mirrored = [];
         public sbyte[] SortBias = [];
         public AABB?[] BoundsOverride = [];
@@ -1079,6 +1094,8 @@ public sealed partial class RenderWorld : IDisposable
             Name[index] = host._name[index];
             Flags[index] = host._flags[index];
             LayerMask[index] = host._layerMask[index];
+            for (uint bits = LayerMask[index]; bits != 0; bits &= bits - 1)
+                _layersWith[System.Numerics.BitOperations.TrailingZeroCount(bits)] |= LayerMask[index];
             SortBias[index] = host._sortBias[index];
             LodBias[index] = host._lodBias[index];
             ForcedLod[index] = host._forcedLod[index];

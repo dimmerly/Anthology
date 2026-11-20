@@ -25,7 +25,7 @@ internal sealed class SceneDrawer(FramePipeline frame, CameraFrame camera)
         s_transforms = "Graphite_Transforms", s_views = "Graphite_Views", s_worldLighting = "Graphite_WorldLighting",
         s_fogVolume = "Graphite_FogVolume", s_fogVolumes = "Graphite_FogVolumes", s_cloudShadowMap = "Graphite_CloudShadowMap",
         s_cloudShadowData = "Graphite_CloudShadowData", s_voxels = "Graphite_Voxels", s_farShadowMap = "Graphite_FarShadowMap",
-        s_farShadowData = "Graphite_FarShadowData";
+        s_farShadowData = "Graphite_FarShadowData", s_lightClusters = "Graphite_LightClusters";
 
     private readonly PropertySet _properties = new();
     private (DeviceBuffer? Buffer, uint Offset, uint Size) _globals;
@@ -77,6 +77,7 @@ internal sealed class SceneDrawer(FramePipeline frame, CameraFrame camera)
         camera.ViewTable.Set(s_farShadowMap, 0, farShadow ? far!.Heights! : frame.Resources.NoFarShadowMap);
         camera.ViewTable.Set(s_farShadowData, 0, farShadow ? far!.Data : frame.Resources.NoFarShadowData);
         camera.ViewTable.Set(s_tableSampler, 0, frame.Resources.LinearClamp);
+        camera.ViewTable.Set(s_lightClusters, 0, (object?)camera.LightClusters ?? frame.Resources.NoLightClusters);
         _viewTable = camera.ViewTable.Get(ring);
         _properties.SetBuffer(GraphiteBindings.InstancesName, camera.Instances.Buffer);
         _properties.SetBuffer(GraphiteBindings.DrawRecordsName, camera.Records.Buffer);

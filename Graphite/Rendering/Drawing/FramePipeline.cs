@@ -51,6 +51,9 @@ internal sealed partial class FramePipeline : IDisposable
     private readonly VoxelPass _voxels;
     private readonly DeformPass _deform;
     private readonly GpuCullPass _gpuCull;
+
+    /// <summary>Bins each view's local lights before it draws.</summary>
+    internal LightClusterPass LightClusters { get; }
     private readonly Dictionary<int, CameraFrame> _cameras = new();
     private readonly Dictionary<(int Page, PrimitiveTopology Topology), VertexSource> _vertexSources = new();
     private readonly List<PlannedInstance> _planned = new();
@@ -121,6 +124,7 @@ internal sealed partial class FramePipeline : IDisposable
             InternalShaders.Compute(device, compiler, "Internal/VoxelCacheUpdate.glsl", policy, lit: true));
         _deform = new DeformPass(InternalShaders.Compute(device, compiler, "Internal/Deform.glsl", policy), geometry);
         _gpuCull = new GpuCullPass(InternalShaders.Compute(device, compiler, "Internal/Cull.glsl", policy), geometry);
+        LightClusters = new LightClusterPass(InternalShaders.Compute(device, compiler, "Internal/LightClusters.glsl", policy, lit: true));
         _readback = new ReadbackStaging(device, report);
     }
 
@@ -1111,6 +1115,7 @@ internal sealed partial class FramePipeline : IDisposable
         _voxels.Dispose();
         _deform.Dispose();
         _gpuCull.Dispose();
+        LightClusters.Dispose();
         Programs.Dispose();
         foreach (IDisposable retired in _retired)
             retired.Dispose();

@@ -1,13 +1,15 @@
 // Box projected decals, applied in the forward pass before lighting so their base colour, normal, specular roughness,
 // metalness and occlusion reach both the lighting and the thin G-buffer. A mask texture holds occlusion, specular
-// roughness and metalness in R, G and B. Decals live in H-Forward trees like lights: a point query finds the
-// ones whose box holds the surface, and up to eight are applied, lowest priority first. A custom surface shader adds its
+// roughness and metalness in R, G and B. Decals live in trees like lights. A fragment reads its cluster's decals, listed
+// lowest priority first, see Graphite/LightClusters.glsl; elsewhere a point query finds the ones whose box holds the
+// surface. Of those covering it the eight of highest priority are applied, lowest priority first. A custom surface shader adds its
 // own channels by defining GRAPHITE_DECAL_EXTRA and a Graphite_ApplyDecalExtra function, called after each decal with its
 // extra textures and host data.
 #pragma once
 
 #include "Graphite/Trees.glsl"
 #include "Graphite/Textures.glsl"
+#include "Graphite/LightClusters.glsl"
 
 #define GRAPHITE_MAX_DECALS 8
 
@@ -33,7 +35,7 @@ struct Graphite_DecalRecord
 
 Graphite_DecalRecord Graphite_DecalAt(uint array, uint index)
 {
-    uint w = index * 10u;
+    uint w = index * GRAPHITE_DECAL_WORDS;
     Graphite_DecalRecord d;
     d.row0 = Graphite_SpatialVec4(array, w);
     d.row1 = Graphite_SpatialVec4(array, w + 1u);
@@ -112,6 +114,84 @@ bool Graphite_DecalBefore(float priority, uint sequence, float otherPriority, ui
 {
     return priority < otherPriority || (priority == otherPriority && sequence < otherSequence);
 }
+
+#ifdef GRAPHITE_CLUSTERED
+
+// A clustered decal hit's record array, index and the offsets into its tree
+void graphite_DecalHit(uvec2 hit, out uint array, out uint index, out vec3 offset, out vec3 offsetLow)
+{
+    array = GRAPHITE_SET_DECALS * 2u + (hit.x >> 31);
+    index = hit.x & 0x7FFFFFFFu;
+    Graphite_HitOffsets(GRAPHITE_SET_DECALS, hit.y, offset, offsetLow);
+}
+
+// How much the clustered decal hit covers the surface, its unit box position in local
+float graphite_DecalHitCoverage(uvec2 hit, vec3 relativePos, vec3 geomNormal, uint layers, out uint array, out uint index, out vec3 local)
+{
+    vec3 offset, offsetLow;
+    graphite_DecalHit(hit, array, index, offset, offsetLow);
+    Graphite_DecalRecord d;
+    uint w = index * GRAPHITE_DECAL_WORDS;
+    d.row0 = Graphite_SpatialVec4(array, w);
+    d.row1 = Graphite_SpatialVec4(array, w + 1u);
+    d.row2 = Graphite_SpatialVec4(array, w + 2u);
+    d.color = Graphite_SpatialVec4(array, w + 4u);
+    d.params = Graphite_SpatialVec4(array, w + 6u);
+    d.axis = Graphite_SpatialVec4(array, w + 7u);
+    local = Graphite_DecalLocal(d, relativePos, offset, offsetLow);
+    return Graphite_DecalCoverage(d, local, geomNormal, layers);
+}
+
+// Applies the decals of the fragment's cluster whose box holds relativePos, camera relative, to the surface: the
+// GRAPHITE_MAX_DECALS of highest priority, lowest first, as the cluster lists them in the order they apply. geomNormal
+// is the normal before normal mapping, used to fade decals on surfaces turned away from them. The PBR model passes
+// base_color, geometry_normal, specular_roughness, base_metalness and occlusion.
+void Graphite_ApplyDecals(vec3 relativePos, vec3 geomNormal,
+                          inout vec3 baseColor, inout vec3 normal, inout float specularRoughness, inout float metalness, inout float occlusion)
+{
+#ifndef GRAPHITE_DECALS
+    return;
+#endif
+    uint layers = Graphite_SurfaceLayers();
+    uint base = Graphite_FragmentCluster(relativePos) + GRAPHITE_CLUSTER_DECALS;
+    uint count = min(graphite_LightClusters[base].x, GRAPHITE_CLUSTER_MAX_DECALS);
+    if (count == 0u)
+        return;
+
+    // The first to apply: walking back from the highest priority until GRAPHITE_MAX_DECALS cover the surface
+    uint first = 0u;
+    if (count > uint(GRAPHITE_MAX_DECALS))
+    {
+        int covering = 0;
+        for (uint i = count; i > 0u; i--)
+        {
+            uint array, index;
+            vec3 local;
+            if (graphite_DecalHitCoverage(graphite_LightClusters[base + i], relativePos, geomNormal, layers, array, index, local) > 0.0
+                && ++covering == GRAPHITE_MAX_DECALS)
+            {
+                first = i - 1u;
+                break;
+            }
+        }
+    }
+
+    for (uint i = first; i < count; i++)
+    {
+        uint array, index;
+        vec3 local;
+        float coverage = graphite_DecalHitCoverage(graphite_LightClusters[base + 1u + i], relativePos, geomNormal, layers, array, index, local);
+        if (coverage <= 0.0)
+            continue;
+        Graphite_DecalRecord d = Graphite_DecalAt(array, index);
+        Graphite_ApplyDecal(d, local, coverage, baseColor, normal, specularRoughness, metalness, occlusion);
+#ifdef GRAPHITE_DECAL_EXTRA
+        Graphite_ApplyDecalExtra(d, local.xy + 0.5, coverage);
+#endif
+    }
+}
+
+#else
 
 // Applies every decal whose box holds relativePos, camera relative, to the surface. geomNormal is the normal before
 // normal mapping, used to fade decals on surfaces turned away from them. The PBR model passes base_color,
@@ -195,3 +275,5 @@ void Graphite_ApplyDecals(vec3 relativePos, vec3 geomNormal,
 #endif
     }
 }
+
+#endif
