@@ -142,8 +142,6 @@ internal static class GraphiteBindings
         new ResourceLayoutElementDescription("Graphite_Ltc", ResourceKind.TextureReadOnly, Graphics, Ltc),
         new ResourceLayoutElementDescription("Graphite_FogVolume", ResourceKind.TextureReadOnly, Graphics, FogVolume),
         new ResourceLayoutElementDescription("Graphite_FogVolumes", ResourceKind.StructuredBufferReadOnly, Graphics, FogVolumes),
-        new ResourceLayoutElementDescription("Graphite_CloudShadowMap", ResourceKind.TextureReadOnly, Graphics, CloudShadowMap),
-        new ResourceLayoutElementDescription("Graphite_CloudShadowData", ResourceKind.StructuredBufferReadOnly, Graphics, CloudShadowData),
         new ResourceLayoutElementDescription("Graphite_Voxels", ResourceKind.StructuredBufferReadWrite, ShaderStages.Fragment | ShaderStages.Compute, Voxels),
         new ResourceLayoutElementDescription("Graphite_FarShadowMap", ResourceKind.TextureReadOnly, Graphics, FarShadowMap),
         new ResourceLayoutElementDescription("Graphite_FarShadowData", ResourceKind.StructuredBufferReadOnly, Graphics, FarShadowData),

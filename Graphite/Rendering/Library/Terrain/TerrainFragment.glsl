@@ -12,9 +12,7 @@
 void Terrain_ClipHoles()
 {
 #ifdef TERRAIN_HOLES
-    ivec2 quad = ivec2(floor(vTerrainHole.xy * TERRAIN_PAGE_SIZE - 0.5));
-    uint bits = packUnorm4x8(texelFetch(_TerrainControl, ivec3(quad, int(vTerrainHole.z + 0.5)), 0));
-    if ((bits & (1u << 20)) != 0u)
+    if (Terrain_IsHole(vTerrainHole))
         discard;
 #endif
 }
@@ -30,6 +28,22 @@ void Terrain_Inputs(inout Graphite_SurfaceData i)
     i.geometryNormal = n;
     i.tangent = t;
     i.bitangent = cross(n, t);
+}
+
+uniform vec4 _TerrainBrush;         // the centre's x and z in metres from the terrain's corner, the radius, the soft share of the radius
+uniform vec4 _TerrainBrushColor;    // the tint and how strongly the inside takes it, 0 to hide the brush
+
+// Tints the brush's circle, softly inside and solidly along its rim
+void Terrain_Brush(inout PBR_Params p, Graphite_SurfaceData i)
+{
+    if (_TerrainBrushColor.a <= 0.0 || _TerrainBrush.z <= 0.0)
+        return;
+    float d = length(vTerrainLocal.xz - _TerrainBrush.xy) / _TerrainBrush.z;
+    if (d >= 1.0)
+        return;
+    float inside = 1.0 - smoothstep(1.0 - _TerrainBrush.w, 1.0, d);
+    float rim = smoothstep(0.93, 0.97, d);
+    p.baseColor = mix(p.baseColor, _TerrainBrushColor.rgb, max(inside * _TerrainBrushColor.a, rim));
 }
 
 float Terrain_Level() { return vTerrainLod.x; }

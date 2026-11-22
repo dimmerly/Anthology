@@ -1397,6 +1397,10 @@ namespace Prowl.PaperUI
             public bool IsMultiLine;
             /// <summary>The cursor still has to be scrolled into view once the input has been laid out.</summary>
             public bool RevealCursor;
+            /// <summary>Where Up and Down aim for, kept while the cursor only moves vertically.</summary>
+            public float? GoalX;
+            /// <summary>When the cursor last moved, which its blink restarts from.</summary>
+            public float BlinkStart;
 
             public readonly bool HasSelection => SelectionStart >= 0 && SelectionEnd >= 0 && SelectionStart != SelectionEnd;
 
@@ -1587,6 +1591,13 @@ namespace Prowl.PaperUI
             ? _paper.IsKeyDown(PaperKey.LeftAlt) || _paper.IsKeyDown(PaperKey.RightAlt)
             : IsControlPressed();
 
+        // One character back or forward, keeping a surrogate pair whole.
+        private static int StepBack(string text, int position) =>
+            position >= 2 && char.IsLowSurrogate(text[position - 1]) && char.IsHighSurrogate(text[position - 2]) ? position - 2 : Maths.Max(0, position - 1);
+
+        private static int StepForward(string text, int position) =>
+            position + 1 < text.Length && char.IsHighSurrogate(text[position]) && char.IsLowSurrogate(text[position + 1]) ? position + 2 : Maths.Min(text.Length, position + 1);
+
         /// <summary>
         /// Finds the start of the previous word from the current position
         /// </summary>
@@ -1659,39 +1670,37 @@ namespace Prowl.PaperUI
 
         private void MoveCursorVertical(ref TextInputState state, int direction, TextInputSettings settings)
         {
-            if (!state.IsMultiLine) return;
+            var area = TextInputArea.Size;
+            if (!state.IsMultiLine || area.X <= 0) return;
 
-            var lines = state.GetLines();
-            int currentLine = state.GetCursorLine();
-            int targetLine = Maths.Clamp(currentLine + direction, 0, lines.Length - 1);
+            var text = LayoutInput(state.Value, settings, true, area);
+            int target = text.LineOf(state.CursorPosition) + direction;
+            if (target < 0 || target >= text.Layout.Lines.Count) return;
 
-            if (targetLine == currentLine) return;
+            state.GoalX ??= text.CursorAt(state.CursorPosition).X;
+            MoveCursor(ref state, Maths.Clamp(text.IndexOnLine(target, state.GoalX.Value), 0, state.Value.Length));
+        }
 
-            int currentColumn = state.GetCursorColumn();
+        private static int LineStart(string text, int position) => position <= 0 ? 0 : text.LastIndexOf('\n', position - 1) + 1;
 
-            // Move to the same column in the target line, or end of line if shorter
-            int targetColumn = Maths.Min(currentColumn, lines[targetLine].Length);
+        private static int LineEnd(string text, int position)
+        {
+            int end = text.IndexOf('\n', position);
+            return end < 0 ? text.Length : end;
+        }
 
-            // Calculate new cursor position
-            int newPosition = 0;
-            for (int i = 0; i < targetLine; i++)
-            {
-                newPosition += lines[i].Length;
-                // Only add +1 for newline if this isn't the last line in the original text
-                if (i < lines.Length - 1 || state.Value.EndsWith('\n'))
-                    newPosition += 1;
-            }
-            newPosition += targetColumn;
-
+        // Moves the cursor, extending the selection while Shift is held.
+        private void MoveCursor(ref TextInputState state, int position)
+        {
             if (IsShiftPressed())
             {
                 if (state.SelectionStart < 0) state.SelectionStart = state.CursorPosition;
-                state.CursorPosition = newPosition;
-                state.SelectionEnd = newPosition;
+                state.CursorPosition = position;
+                state.SelectionEnd = position;
             }
             else
             {
-                state.CursorPosition = newPosition;
+                state.CursorPosition = position;
                 state.ClearSelection();
             }
         }
@@ -1699,10 +1708,11 @@ namespace Prowl.PaperUI
         private bool ProcessKeyCommand(ref TextInputState state, PaperKey key, TextInputSettings settings)
         {
             bool valueChanged = false;
+            int cursorBefore = state.CursorPosition;
 
             switch (key)
             {
-                case PaperKey.Backspace:
+                case PaperKey.Backspace when !settings.ReadOnly:
                     if (state.HasSelection)
                     {
                         state.DeleteSelection();
@@ -1710,13 +1720,14 @@ namespace Prowl.PaperUI
                     }
                     else if (state.CursorPosition > 0)
                     {
-                        state.Value = state.Value.Remove(state.CursorPosition - 1, 1);
-                        state.CursorPosition--;
+                        int from = IsWordModifierPressed() ? FindPreviousWordStart(state.Value, state.CursorPosition) : StepBack(state.Value, state.CursorPosition);
+                        state.Value = state.Value.Remove(from, state.CursorPosition - from);
+                        state.CursorPosition = from;
                         valueChanged = true;
                     }
                     break;
 
-                case PaperKey.Delete:
+                case PaperKey.Delete when !settings.ReadOnly:
                     if (state.HasSelection)
                     {
                         state.DeleteSelection();
@@ -1724,7 +1735,8 @@ namespace Prowl.PaperUI
                     }
                     else if (state.CursorPosition < state.Value.Length)
                     {
-                        state.Value = state.Value.Remove(state.CursorPosition, 1);
+                        int to = IsWordModifierPressed() ? FindNextWordEnd(state.Value, state.CursorPosition) : StepForward(state.Value, state.CursorPosition);
+                        state.Value = state.Value.Remove(state.CursorPosition, to - state.CursorPosition);
                         valueChanged = true;
                     }
                     break;
@@ -1749,7 +1761,7 @@ namespace Prowl.PaperUI
                     else if (IsShiftPressed())
                     {
                         if (state.SelectionStart < 0) state.SelectionStart = state.CursorPosition;
-                        state.CursorPosition = Maths.Max(0, state.CursorPosition - 1);
+                        state.CursorPosition = StepBack(state.Value, state.CursorPosition);
                         state.SelectionEnd = state.CursorPosition;
                     }
                     else
@@ -1757,7 +1769,7 @@ namespace Prowl.PaperUI
                         if (state.HasSelection)
                             state.CursorPosition = Maths.Min(state.SelectionStart, state.SelectionEnd);
                         else
-                            state.CursorPosition = Maths.Max(0, state.CursorPosition - 1);
+                            state.CursorPosition = StepBack(state.Value, state.CursorPosition);
                         state.ClearSelection();
                     }
                     break;
@@ -1782,7 +1794,7 @@ namespace Prowl.PaperUI
                     else if (IsShiftPressed())
                     {
                         if (state.SelectionStart < 0) state.SelectionStart = state.CursorPosition;
-                        state.CursorPosition = Maths.Min(state.Value.Length, state.CursorPosition + 1);
+                        state.CursorPosition = StepForward(state.Value, state.CursorPosition);
                         state.SelectionEnd = state.CursorPosition;
                     }
                     else
@@ -1790,37 +1802,17 @@ namespace Prowl.PaperUI
                         if (state.HasSelection)
                             state.CursorPosition = Maths.Max(state.SelectionStart, state.SelectionEnd);
                         else
-                            state.CursorPosition = Maths.Min(state.Value.Length, state.CursorPosition + 1);
+                            state.CursorPosition = StepForward(state.Value, state.CursorPosition);
                         state.ClearSelection();
                     }
                     break;
 
                 case PaperKey.Home:
-                    if (IsShiftPressed())
-                    {
-                        if (state.SelectionStart < 0) state.SelectionStart = state.CursorPosition;
-                        state.CursorPosition = 0;
-                        state.SelectionEnd = state.CursorPosition;
-                    }
-                    else
-                    {
-                        state.CursorPosition = 0;
-                        state.ClearSelection();
-                    }
+                    MoveCursor(ref state, IsControlPressed() ? 0 : LineStart(state.Value, state.CursorPosition));
                     break;
 
                 case PaperKey.End:
-                    if (IsShiftPressed())
-                    {
-                        if (state.SelectionStart < 0) state.SelectionStart = state.CursorPosition;
-                        state.CursorPosition = state.Value.Length;
-                        state.SelectionEnd = state.CursorPosition;
-                    }
-                    else
-                    {
-                        state.CursorPosition = state.Value.Length;
-                        state.ClearSelection();
-                    }
+                    MoveCursor(ref state, IsControlPressed() ? state.Value.Length : LineEnd(state.Value, state.CursorPosition));
                     break;
 
                 case PaperKey.A when IsControlPressed():
@@ -1839,7 +1831,7 @@ namespace Prowl.PaperUI
                     }
                     break;
 
-                case PaperKey.X when IsControlPressed() && state.HasSelection:
+                case PaperKey.X when IsControlPressed() && state.HasSelection && !settings.ReadOnly:
                     {
                         if (settings.MaskChar.HasValue) break;
                         int start = Maths.Min(state.SelectionStart, state.SelectionEnd);
@@ -1850,14 +1842,16 @@ namespace Prowl.PaperUI
                     }
                     break;
 
-                case PaperKey.V when IsControlPressed():
+                case PaperKey.V when IsControlPressed() && !settings.ReadOnly:
                     {
                         string clipText = _paper.GetClipboard();
                         if (!string.IsNullOrEmpty(clipText))
                         {
+                            clipText = clipText.Replace("\r\n", "\n").Replace('\r', '\n');
+
                             // For single-line, replace newlines with spaces
                             if (!state.IsMultiLine)
-                                clipText = clipText.Replace('\n', ' ').Replace('\r', ' ');
+                                clipText = clipText.Replace('\n', ' ');
 
                             // Apply character filter to pasted text
                             if (settings.CharFilter != null)
@@ -1926,6 +1920,9 @@ namespace Prowl.PaperUI
                     MoveCursorVertical(ref state, 1, settings);
                     break;
             }
+
+            if (key is not (PaperKey.Up or PaperKey.Down) && (valueChanged || state.CursorPosition != cursorBefore))
+                state.GoalX = null;
 
             return valueChanged;
         }
@@ -2110,6 +2107,7 @@ namespace Prowl.PaperUI
                     return;
 
                 var currentState = LoadTextInputState(value, isMultiLine);
+                currentState.GoalX = null;
                 var clickPos = e.RelativePosition.X - TextInputArea.Min.X + currentState.ScrollOffsetX;
                 var clickPosY = isMultiLine ? e.RelativePosition.Y - TextInputArea.Min.Y + currentState.ScrollOffsetY : 0;
                 var newPosition = Maths.Clamp(
@@ -2215,6 +2213,7 @@ namespace Prowl.PaperUI
 
                 currentState.CursorPosition = pos;
                 currentState.SelectionEnd = pos;
+                currentState.GoalX = null;
                 EnsureCursorVisible(ref currentState, settings, isMultiLine);
                 SaveTextInputState(currentState);
             });
@@ -2256,6 +2255,7 @@ namespace Prowl.PaperUI
 
                 currentState.Value = currentState.Value.Insert(currentState.CursorPosition, e.Character.ToString());
                 currentState.CursorPosition++;
+                currentState.GoalX = null;
 
                 EnsureCursorVisible(ref currentState, settings, isMultiLine);
                 SaveTextInputState(currentState);
@@ -2332,7 +2332,7 @@ namespace Prowl.PaperUI
                         }
 
                         // Draw blinking cursor
-                        if ((int)(_paper.Time * 2) % 2 == 0)
+                        if ((int)((_paper.Time - renderState.BlinkStart) * 2) % 2 == 0)
                         {
                             var cursorPos = text.CursorAt(renderState.CursorPosition);
                             float cursorX = r.Min.X + cursorPos.X;
@@ -2403,6 +2403,17 @@ namespace Prowl.PaperUI
                 return new Float2(p.X + LineOffset(LineOf(index)), p.Y + OffsetY);
             }
 
+            /// <summary>The character index nearest a horizontal position on a line.</summary>
+            public int IndexOnLine(int line, float x)
+            {
+                var l = Layout.Lines[line];
+                int index = Layout.GetCursorIndex(new Float2((x - LineOffset(line)) / _invFb, l.Position.Y + l.Height * 0.5f));
+
+                // A wrapped line can start on the index the line above ends on, where the cursor shows on the line above.
+                bool onLineAbove = line > 0 && index == l.StartIndex && Layout.Lines[line - 1].EndIndex == index;
+                return onLineAbove && index < l.EndIndex ? index + 1 : index;
+            }
+
             public int IndexAt(Float2 point)
             {
                 if (Layout.Lines.Count == 0) return 0;
@@ -2434,6 +2445,7 @@ namespace Prowl.PaperUI
         private void EnsureCursorVisible(ref TextInputState state, TextInputSettings settings, bool isMultiLine)
         {
             var area = TextInputArea.Size;
+            state.BlinkStart = _paper.Time;
 
             // Focus set from code arrives before layout, when there is no area to scroll within yet.
             state.RevealCursor = area.X <= 0 || area.Y <= 0;

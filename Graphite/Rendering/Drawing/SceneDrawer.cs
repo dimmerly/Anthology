@@ -68,9 +68,6 @@ internal sealed class SceneDrawer(FramePipeline frame, CameraFrame camera)
         camera.ViewTable.Set(s_ltc, 0, frame.Resources.Ltc);
         camera.ViewTable.Set(s_backDepth, 0, (object?)camera.BackDepthView() ?? frame.Resources.NoSceneDepth);
         camera.ViewTable.Set(s_fogVolume, 0, camera.FogWritten && camera.FogVolume != null ? camera.FogVolume : frame.Resources.NoFogVolume);
-        bool clouds = camera.CloudShadowMap != null && camera.CloudShadowData != null;
-        camera.ViewTable.Set(s_cloudShadowMap, 0, clouds ? camera.CloudShadowMap!.ColorTextures[0] : frame.Resources.NoCloudShadowMap);
-        camera.ViewTable.Set(s_cloudShadowData, 0, clouds ? camera.CloudShadowData! : frame.Resources.NoCloudShadowData);
         camera.ViewTable.Set(s_voxels, 0, camera.VoxelTarget ?? frame.Resources.NoVoxels);
         FarShadowMap? far = camera.World.World.FarShadow;
         bool farShadow = far != null && far.Active;

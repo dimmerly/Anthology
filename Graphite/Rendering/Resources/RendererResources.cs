@@ -84,9 +84,6 @@ internal sealed class RendererResources : IDisposable
         }
         NoFogVolume = factory.CreateTexture(TextureDescription.Texture3D(1, 1, 1, 1, PixelFormat.R16_G16_B16_A16_Float, TextureUsage.Sampled));
         device.UpdateTexture<ushort>(NoFogVolume, [0, 0, 0, 0x3C00], TextureRegion.Whole(NoFogVolume, 0, 0));
-        NoCloudShadowMap = factory.CreateTexture(TextureDescription.Texture2D(1, 1, 1, 1, PixelFormat.R16_G16_B16_A16_Float, TextureUsage.Sampled));
-        device.UpdateTexture<ushort>(NoCloudShadowMap, [0, 0, 0, 0], TextureRegion.Whole(NoCloudShadowMap, 0, 0));
-        NoCloudShadowData = factory.CreateBuffer(new BufferDescription(CloudShadowRecord.Size, BufferUsage.StructuredBufferReadOnly));
         NoFarShadowMap = factory.CreateTexture(TextureDescription.Texture2D(1, 1, 1, 1, PixelFormat.R32_Float, TextureUsage.Sampled));
         device.UpdateTexture<float>(NoFarShadowMap, [-1e30f], TextureRegion.Whole(NoFarShadowMap, 0, 0));
         NoFarShadowData = factory.CreateBuffer(new BufferDescription(FarShadowRecord.Size, BufferUsage.StructuredBufferReadOnly));
@@ -165,9 +162,6 @@ internal sealed class RendererResources : IDisposable
     /// <summary>The fog volume a view without volumetric fog reads: no light and everything let through.</summary>
     public Texture NoFogVolume { get; }
 
-    /// <summary>What views without clouds read as the cloud shadow, which leaves the sun unshaded.</summary>
-    public Texture NoCloudShadowMap { get; }
-    public DeviceBuffer NoCloudShadowData { get; }
     public Texture NoFarShadowMap { get; }
     public DeviceBuffer NoFarShadowData { get; }
 
@@ -300,8 +294,6 @@ internal sealed class RendererResources : IDisposable
         NoSceneColor.Dispose();
         NoSceneDepth.Dispose();
         NoFogVolume.Dispose();
-        NoCloudShadowMap.Dispose();
-        NoCloudShadowData.Dispose();
         NoFarShadowMap.Dispose();
         NoFarShadowData.Dispose();
         NoLightClusters.Dispose();
