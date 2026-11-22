@@ -118,7 +118,16 @@ public sealed class LightmapTarget
     /// <para>Decode in the shader as <c>rgb * a * maxRange</c> (with the same <paramref name="maxRange"/>).
     /// Sample the texture in <b>linear</b> space (no sRGB) — the data is linear radiance, not colour.</para>
     /// </summary>
-    public byte[] ReadRGBM(float maxRange = 8f)
+    public byte[] ReadRGBM(float maxRange = 8f) => ReadRGBM(maxRange, dither: false);
+
+    /// <summary>
+    /// <see cref="ReadRGBM(float)"/>, optionally dithered. Eight bits leave dim light only a few dozen levels between
+    /// black and the page's brightest texel, so a smooth falloff comes out as visible rings. Dithering adds a fixed
+    /// triangular noise of one level to the colour before rounding, so neighbouring texels round either way and
+    /// average back to the true value: the rings become an even grain at the size of one level, which bilinear
+    /// filtering mostly hides. The noise is hashed from the texel, so a rebake of the same lighting writes the same bytes.
+    /// </summary>
+    public byte[] ReadRGBM(float maxRange, bool dither)
     {
         if (maxRange <= 0f) maxRange = 8f;
         int n = Width * Height;
@@ -137,19 +146,36 @@ public sealed class LightmapTarget
             float a = (float)System.Math.Ceiling(m * 255f) / 255f;
 
             float inv = 1f / (maxRange * a);
-            bytes[i * 4] = (byte)System.Math.Clamp((int)(r * inv * 255f + 0.5f), 0, 255);
-            bytes[i * 4 + 1] = (byte)System.Math.Clamp((int)(g * inv * 255f + 0.5f), 0, 255);
-            bytes[i * 4 + 2] = (byte)System.Math.Clamp((int)(b * inv * 255f + 0.5f), 0, 255);
+            // Rounding offset: 0.5 alone, or plus triangular noise in (-1, 1) shared by the three channels so the
+            // grain stays neutral rather than coloured.
+            float offset = 0.5f;
+            if (dither)
+            {
+                uint h = Hash((uint)i);
+                offset += ((h & 0xFFFF) + (h >> 16)) * (1f / 65535f) - 1f;
+            }
+            bytes[i * 4] = (byte)System.Math.Clamp((int)System.Math.Floor(r * inv * 255f + offset), 0, 255);
+            bytes[i * 4 + 1] = (byte)System.Math.Clamp((int)System.Math.Floor(g * inv * 255f + offset), 0, 255);
+            bytes[i * 4 + 2] = (byte)System.Math.Clamp((int)System.Math.Floor(b * inv * 255f + offset), 0, 255);
             bytes[i * 4 + 3] = (byte)System.Math.Clamp((int)(a * 255f + 0.5f), 0, 255);
         }
         return bytes;
+    }
+
+    // Lowbias32 (Wellons): a cheap integer hash with no visible pattern, for per-texel dither.
+    private static uint Hash(uint x)
+    {
+        x ^= x >> 16; x *= 0x7FEB352Du;
+        x ^= x >> 15; x *= 0x846CA68Bu;
+        x ^= x >> 16;
+        return x;
     }
 
     /// <summary>
     /// Tonemapped + gamma-encoded 8-bit RGB, for <b>previews only</b>. This bakes in Reinhard
     /// tonemapping and gamma, which is wrong for storing an actual lightmap (the lightmap must stay
     /// linear HDR and be tonemapped with the rest of the scene at runtime). For storage use
-    /// <see cref="ReadHDRRGBA"/> (float) or <see cref="ReadRGBM"/> (compact 8-bit HDR).
+    /// <see cref="ReadHDRRGBA"/> (float) or <see cref="ReadRGBM(float, bool)"/> (compact 8-bit HDR).
     /// </summary>
     public byte[] ReadLDR(float exposure = 1f, float gamma = 1f / 2.2f)
     {

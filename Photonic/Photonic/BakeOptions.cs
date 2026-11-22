@@ -1,4 +1,4 @@
-// This file is part of the Prowl Game Engine
+﻿// This file is part of the Prowl Game Engine
 // Licensed under the MIT License. See the LICENSE file in the project root for details.
 
 using Prowl.Vector;
@@ -76,6 +76,22 @@ public sealed class BakeOptions
     /// the chart, and anything less means it samples texels the bake never wrote.
     /// </summary>
     public int DilatePixels { get; set; } = 2;
+
+    /// <summary>
+    /// Passes of the edge-avoiding filter run over the indirect estimate each iteration, 0 for none. Each pass doubles
+    /// the filter's reach (4 passes average across about 60 texels of the same surface), trading fine indirect detail
+    /// such as contact darkening for far less speckle. Direct light is never filtered.
+    /// Only applies when <see cref="SparseStride"/> is 1.
+    /// </summary>
+    public int DenoisePasses { get; set; } = 0;
+
+    /// <summary>
+    /// The iteration the host reads the result at. Iterations from this one on are finished in full: denoised, seams
+    /// stitched, gutters dilated and published to the targets. Earlier ones only accumulate samples, since every
+    /// iteration writes each texel again from the running totals and nothing would see their finishing. 0 finishes
+    /// every iteration, for a host that shows the bake converging.
+    /// </summary>
+    public int FinalIteration { get; set; } = 0;
 
     /// <summary>
     /// Blend the two sides of every UV seam together after each iteration, so edges that are

@@ -77,6 +77,7 @@ internal sealed class TargetWorkspace
     public Float3[]? DirectCache;          // deterministic direct lighting per texel; computed once.
     public Float3[]? IndirectSum;          // accumulator for indirect samples; sum / count = current estimate.
     public int[]? IndirectSampleCount;     // number of indirect samples folded into IndirectSum so far.
+    public Float3[]? DenoiseA, DenoiseB;   // ping-pong buffers for the indirect denoiser, allocated on first use.
 
     public TargetWorkspace(LightmapTarget t)
     {

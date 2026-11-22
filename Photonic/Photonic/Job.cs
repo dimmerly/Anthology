@@ -1,4 +1,4 @@
-// This file is part of the Prowl Game Engine
+﻿// This file is part of the Prowl Game Engine
 // Licensed under the MIT License. See the LICENSE file in the project root for details.
 
 using Prowl.Photonic.Integration;
@@ -445,6 +445,7 @@ public sealed class Job
         while (!_cts.IsCancellationRequested)
         {
             int iter = _iterationCount + 1;
+            bool finishing = iter >= _options.FinalIteration;
             _activity = $"Continuous iter {iter} ({samplesPerIter}s x {bounces} bounces)";
             ulong iterMix = (ulong)iter * 0x6A09E667F3BCC908UL;
 
@@ -516,12 +517,15 @@ public sealed class Job
                     }
                 }
                 catch (System.OperationCanceledException) { return; }
+
+                if (sparse is null && _options.DenoisePasses > 0 && finishing)
+                    Imaging.IndirectDenoiser.Apply(ws, _options.DenoisePasses, parallelOpts);
             }
 
             // Stitch UV seams, then dilate into the gutter so chart edges don't bleed black while the
             // viewer polls. Dilation runs on a fresh COPY of Covered so the bake's own coverage state
-            // stays untouched.
-            for (int ti = 0; ti < workspaces.Length; ti++)
+            // stays untouched. Skipped, with the publish, on iterations before the one the host reads.
+            for (int ti = 0; ti < workspaces.Length && finishing; ti++)
             {
                 if (_cts.IsCancellationRequested) return;
                 var ws = workspaces[ti];
