@@ -124,7 +124,7 @@ Shader "Graphite/Unlit"
         {
             #define GRAPHITE_STANDARD_FORWARD
             #define GRAPHITE_STANDARD_DEBUG
-            #pragma variant global GRAPHITE_DEBUG UNLIT ALBEDO NORMALS ROUGHNESS METALLIC AO EMISSION LIGHTING CASCADES LIGHTMAP_DENSITY
+            #pragma variant global GRAPHITE_DEBUG UNLIT ALBEDO NORMALS ROUGHNESS METALLIC AO EMISSION LIGHTING CASCADES LIGHTMAP_DENSITY BAKED LIGHTMAP
             #include "Graphite/Standard/UnlitSurface.glsl"
         }
         Vertex

@@ -26,7 +26,7 @@ public sealed class DebugViewTests
     private static ShaderPass Pass(ShaderDefinition shader, string type)
         => shader.Passes!.First(p => p.Tags != null && p.Tags.TryGetValue("LightMode", out string? mode) && mode == type);
 
-    private static readonly string[] s_modes = ["UNLIT", "ALBEDO", "NORMALS", "ROUGHNESS", "METALLIC", "AO", "EMISSION", "LIGHTING", "CASCADES", "LIGHTMAP_DENSITY"];
+    private static readonly string[] s_modes = ["UNLIT", "ALBEDO", "NORMALS", "ROUGHNESS", "METALLIC", "AO", "EMISSION", "LIGHTING", "CASCADES", "LIGHTMAP_DENSITY", "BAKED", "LIGHTMAP"];
 
     // The PBR model's own views follow the shared ones
     private static readonly string[] s_pbrModes = [.. s_modes, "DIFFUSE", "SPECULAR", "SPECULAR_ALBEDO", "THROUGHPUT", "DIRECT", "INDIRECT", "FURNACE", "COAT", "FUZZ", "THIN_FILM", "DARKENING", "SUBSURFACE", "BACK", "TRANSMISSION", "THICKNESS"];

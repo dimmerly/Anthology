@@ -3,7 +3,7 @@
 // Graphite_DebugInputs before lighting so the LIGHTING view shades a white surface. The Debug pass declares the axis
 // itself, "#pragma variant global GRAPHITE_DEBUG" with the values below, so no other pass compiles a variant per view.
 // Positions are relative, normals in world space.
-//   UNLIT ALBEDO NORMALS ROUGHNESS METALLIC AO EMISSION LIGHTING CASCADES LIGHTMAP_DENSITY
+//   UNLIT ALBEDO NORMALS ROUGHNESS METALLIC AO EMISSION LIGHTING CASCADES LIGHTMAP_DENSITY BAKED LIGHTMAP
 #pragma once
 
 #include "Graphite/Shadows.glsl"
@@ -65,6 +65,20 @@ vec3 Graphite_DebugLightmapDensity(vec3 albedo, vec2 lightmapUV)
 }
 #endif
 
+#ifdef GRAPHITE_DEBUG_LIGHTMAP
+// The object's lightmap texel as stored, decoded and scaled but neither exposed nor turned by a direction page, for
+// looking at what a bake wrote. Dark blue without a lightmap.
+vec3 Graphite_DebugLightmapTexel(vec2 lightmapUV)
+{
+#ifndef GRAPHITE_NO_OBJECT
+    Graphite_ObjectData object = Graphite_Object();
+    if (object.lightmapTexture < GRAPHITE_LIGHTMAP_LOADING)
+        return Graphite_DecodeLightmap(GRAPHITE_SAMPLE_2D(object.lightmapTexture, object.lightmapSampler & 0xFFFFu, lightmapUV), (object.lightmapSampler >> 16) & 0xFFu, object.lightmapScale);
+#endif
+    return vec3(0.02, 0.03, 0.08);
+}
+#endif
+
 vec3 Graphite_DebugView(vec3 color, vec3 albedo, vec3 normal, float roughness, float metallic, float ao, vec3 emission, vec3 position, vec2 lightmapUV)
 {
 #if defined(GRAPHITE_DEBUG_UNLIT)
@@ -88,6 +102,11 @@ vec3 Graphite_DebugView(vec3 color, vec3 albedo, vec3 normal, float roughness, f
     return cascade < 0 ? grey * 0.3 : grey * tints[min(cascade, 3)];
 #elif defined(GRAPHITE_DEBUG_LIGHTMAP_DENSITY)
     return Graphite_DebugLightmapDensity(albedo, lightmapUV);
+#elif defined(GRAPHITE_DEBUG_BAKED) && !defined(GRAPHITE_NO_OBJECT)
+    // The light that is not realtime alone, on a white surface: the lightmap with its direction, else probes or ambient
+    return graphite_BakedDiffuse(normal, lightmapUV);
+#elif defined(GRAPHITE_DEBUG_LIGHTMAP)
+    return Graphite_DebugLightmapTexel(lightmapUV);
 #else
     return color;
 #endif
